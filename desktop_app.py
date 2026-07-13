@@ -14,20 +14,28 @@ docx_to_epub.parse_articles() / build_epub().
 """
 from __future__ import annotations
 
+import re
 import sys
+from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal, QObject
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QSettings
 from PySide6.QtGui import QFont, QPalette
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QLineEdit, QVBoxLayout,
     QHBoxLayout, QFormLayout, QListWidget, QListWidgetItem, QFileDialog,
-    QMessageBox, QFrame, QSizePolicy,
+    QMessageBox, QFrame, QSizePolicy, QDialog, QComboBox, QSpinBox,
+    QPlainTextEdit, QCheckBox,
 )
 
+import cover
 from docx_to_epub import parse_articles, build_epub, Article
+from publisher import GitHubPublisher
 
 APP_NAME = "DOCX to EPUB maker"
+
+SETTINGS_ORG = "MarxistTamil"
+SETTINGS_APP = "EpubMaker"
 
 
 # --- Background worker so building a big book never freezes the window -------
@@ -45,6 +53,28 @@ class BuildWorker(QObject):
             build_epub(articles, out_path, title=title, author=author, language=lang)
             self.done.emit(str(out_path))
         except Exception as exc:  # noqa: BLE001 — surfaced in a dialog
+            self.failed.emit(str(exc))
+
+
+class PublishWorker(QObject):
+    """Uploads a built EPUB (+ generated cover) to the GitHub books repo."""
+    progress = Signal(str)   # log lines from the publisher
+    done = Signal(dict)      # result dict from GitHubPublisher.publish
+    failed = Signal(str)     # error message
+
+    def __init__(self, epub_path, month, year, token):
+        super().__init__()
+        self._args = (epub_path, month, year, token)
+
+    def run(self):
+        epub_path, month, year, token = self._args
+        try:
+            with open(epub_path, "rb") as fh:
+                data = fh.read()
+            pub = GitHubPublisher(token, log=self.progress.emit)
+            result = pub.publish(data, month, year)
+            self.done.emit(result)
+        except Exception as exc:  # noqa: BLE001 — surfaced in the dialog log
             self.failed.emit(str(exc))
 
 
@@ -101,6 +131,145 @@ class DropLabel(QLabel):
         self.style().polish(self)
 
 
+def _guess_month_year(name: str) -> tuple[int, int]:
+    """Best-effort month/year from a file name like 'july_2026'; falls back to
+    today's date."""
+    today = date.today()
+    lower = name.lower()
+    month = next((i + 1 for i, m in enumerate(cover.ENGLISH_MONTHS) if m in lower),
+                 today.month)
+    year_match = re.search(r"(19|20|21)\d{2}", name)
+    year = int(year_match.group()) if year_match else today.year
+    return month, year
+
+
+class PublishDialog(QDialog):
+    """Collects a GitHub token + month/year and streams the upload progress."""
+
+    def __init__(self, parent, epub_path: str, guess_name: str):
+        super().__init__(parent)
+        self.setWindowTitle("Publish to GitHub")
+        self.setMinimumWidth(520)
+        self._epub_path = epub_path
+        self._thread: QThread | None = None
+        self._settings = QSettings(SETTINGS_ORG, SETTINGS_APP)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(12)
+
+        intro = QLabel(
+            f"Upload <b>{Path(epub_path).name}</b> to the MarxistTamilEbooks "
+            "repository. A cover image is generated automatically and "
+            "<code>booksdb.json</code> is updated."
+        )
+        intro.setWordWrap(True)
+        root.addWidget(intro)
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignRight)
+
+        self.token_edit = QLineEdit()
+        self.token_edit.setEchoMode(QLineEdit.Password)
+        self.token_edit.setPlaceholderText("GitHub token (Contents: read & write)")
+        self.token_edit.setText(self._settings.value("github_token", "", str))
+
+        g_month, g_year = _guess_month_year(guess_name)
+        self.month_combo = QComboBox()
+        for i, (en, ta) in enumerate(zip(cover.ENGLISH_MONTHS, cover.TAMIL_MONTHS), 1):
+            self.month_combo.addItem(f"{en.capitalize()} — {ta}", i)
+        self.month_combo.setCurrentIndex(g_month - 1)
+
+        self.year_spin = QSpinBox()
+        self.year_spin.setRange(2000, 2100)
+        self.year_spin.setValue(g_year)
+        self.year_spin.setMaximumWidth(110)
+
+        self.remember_check = QCheckBox("Remember token on this computer")
+        self.remember_check.setChecked(bool(self._settings.value("github_token", "", str)))
+
+        form.addRow("GitHub token", self.token_edit)
+        form.addRow("Month", self.month_combo)
+        form.addRow("Year", self.year_spin)
+        form.addRow("", self.remember_check)
+        root.addLayout(form)
+
+        self.log_view = QPlainTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setObjectName("log")
+        self.log_view.setMinimumHeight(150)
+        self.log_view.setPlaceholderText("Progress will appear here…")
+        root.addWidget(self.log_view, stretch=1)
+
+        btn_row = QHBoxLayout()
+        self.close_btn = QPushButton("Close")
+        self.close_btn.clicked.connect(self.reject)
+        self.publish_btn = QPushButton("Publish")
+        self.publish_btn.setObjectName("primary")
+        self.publish_btn.clicked.connect(self._start)
+        btn_row.addStretch(1)
+        btn_row.addWidget(self.close_btn)
+        btn_row.addWidget(self.publish_btn)
+        root.addLayout(btn_row)
+
+    def _append(self, line: str):
+        self.log_view.appendPlainText(line)
+
+    def _set_inputs_enabled(self, on: bool):
+        for w in (self.token_edit, self.month_combo, self.year_spin,
+                  self.remember_check, self.publish_btn):
+            w.setEnabled(on)
+
+    def _start(self):
+        token = self.token_edit.text().strip()
+        if not token:
+            QMessageBox.warning(self, "Token required",
+                                "Please paste a GitHub token with Contents write access.")
+            return
+
+        if self.remember_check.isChecked():
+            self._settings.setValue("github_token", token)
+        else:
+            self._settings.remove("github_token")
+
+        month = self.month_combo.currentData()
+        year = self.year_spin.value()
+
+        self._set_inputs_enabled(False)
+        self.close_btn.setEnabled(False)
+        self.log_view.clear()
+
+        self._thread = QThread()
+        self._worker = PublishWorker(self._epub_path, month, year, token)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self._append)
+        self._worker.done.connect(self._on_done)
+        self._worker.failed.connect(self._on_failed)
+        self._worker.done.connect(self._thread.quit)
+        self._worker.failed.connect(self._thread.quit)
+        self._thread.start()
+
+    def _on_done(self, result: dict):
+        self.close_btn.setEnabled(True)
+        self._append("")
+        self._append("✓ Published successfully.")
+        self._append(f"   EPUB:  {result['epub_url']}")
+        self._append(f"   Cover: {result['image_url']}")
+        QMessageBox.information(
+            self, "Published",
+            f"“{result['title']}” is now live.\n\n"
+            f"EPUB and cover uploaded, and booksdb.json updated.",
+        )
+
+    def _on_failed(self, msg: str):
+        self._set_inputs_enabled(True)
+        self.close_btn.setEnabled(True)
+        self._append("")
+        self._append(f"✗ Failed: {msg}")
+        QMessageBox.critical(self, "Publish failed", msg)
+
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -109,6 +278,7 @@ class MainWindow(QWidget):
 
         self._articles: list[Article] = []
         self._docx_path: Path | None = None
+        self._epub_path: str | None = None
         self._thread: QThread | None = None
 
         root = QVBoxLayout(self)
@@ -163,11 +333,16 @@ class MainWindow(QWidget):
         btn_row = QHBoxLayout()
         self.status = QLabel("")
         self.status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.publish_btn = QPushButton("Publish to GitHub…")
+        self.publish_btn.setObjectName("secondary")
+        self.publish_btn.setEnabled(False)
+        self.publish_btn.clicked.connect(self.publish_epub)
         self.make_btn = QPushButton("Create EPUB…")
         self.make_btn.setObjectName("primary")
         self.make_btn.setEnabled(False)
         self.make_btn.clicked.connect(self.create_epub)
         btn_row.addWidget(self.status)
+        btn_row.addWidget(self.publish_btn)
         btn_row.addWidget(self.make_btn)
         root.addLayout(btn_row)
 
@@ -198,6 +373,8 @@ class MainWindow(QWidget):
         if not self.title_edit.text().strip():
             self.title_edit.setText(p.stem)
         self.make_btn.setEnabled(True)
+        self.publish_btn.setEnabled(False)
+        self._epub_path = None
         self.status.setText("")
 
     def _show_articles(self, articles: list[Article]):
@@ -235,6 +412,8 @@ class MainWindow(QWidget):
         lang = self.lang_edit.text().strip() or "en"
 
         self.make_btn.setEnabled(False)
+        self.publish_btn.setEnabled(False)
+        self._epub_path = None
         self.status.setText("Building EPUB…")
 
         # Run the build off the UI thread.
@@ -251,11 +430,26 @@ class MainWindow(QWidget):
     def _on_built(self, out_path: str):
         self.status.setText("")
         self.make_btn.setEnabled(True)
+        self._epub_path = out_path
+        self.publish_btn.setEnabled(True)
         QMessageBox.information(
             self, APP_NAME,
             f"Done!\n\nSaved EPUB with {len(self._articles)} article"
-            f"{'s' if len(self._articles) != 1 else ''} to:\n{out_path}",
+            f"{'s' if len(self._articles) != 1 else ''} to:\n{out_path}"
+            "\n\nUse “Publish to GitHub…” to upload it to the books repo.",
         )
+
+    # --- Publishing ---------------------------------------------------------
+    def publish_epub(self):
+        if not self._epub_path or not Path(self._epub_path).exists():
+            self._error("Nothing to publish",
+                        "Create an EPUB first, then publish it.")
+            return
+        guess = Path(self._epub_path).stem
+        if self._docx_path is not None:
+            guess = f"{guess} {self._docx_path.stem}"
+        dlg = PublishDialog(self, self._epub_path, guess)
+        dlg.exec()
 
     def _on_build_failed(self, msg: str):
         self.status.setText("")
@@ -309,7 +503,23 @@ QPushButton#primary {{
 }}
 QPushButton#primary:disabled {{ background: {c['accent_off']}; }}
 QPushButton#primary:hover:enabled {{ background: {c['accent_hover']}; }}
+QPushButton#secondary {{
+    background: {c['panel']}; color: {c['accent']}; font-weight: 600;
+    padding: 9px 16px; border: 1px solid {c['border']}; border-radius: 8px;
+}}
+QPushButton#secondary:disabled {{ color: {c['muted']}; border-color: {c['border_soft']}; }}
+QPushButton#secondary:hover:enabled {{ background: {c['drop_hover']}; }}
+QComboBox, QSpinBox {{ padding: 5px 8px; border: 1px solid {c['border']};
+                      border-radius: 6px; background: {c['panel']}; color: {c['text']}; }}
+QComboBox QAbstractItemView {{ background: {c['panel']}; color: {c['text']};
+                              selection-background-color: {c['accent']};
+                              selection-color: {c['on_accent']}; }}
+QCheckBox {{ background: transparent; color: {c['muted']}; }}
+QPlainTextEdit#log {{ border: 1px solid {c['border_soft']}; border-radius: 8px;
+                     background: {c['panel']}; color: {c['text']};
+                     font-family: "Menlo", "Consolas", monospace; font-size: 12px; }}
 QMessageBox, QMessageBox QLabel {{ background: {c['bg']}; color: {c['text']}; }}
+QDialog {{ background: {c['bg']}; color: {c['text']}; }}
 """
 
 
@@ -323,6 +533,7 @@ def _is_dark(app: QApplication) -> bool:
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setOrganizationName(SETTINGS_ORG)
     app.setStyleSheet(build_style(DARK if _is_dark(app) else LIGHT))
     win = MainWindow()
     win.show()

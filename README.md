@@ -41,6 +41,37 @@ Then: drag a `.docx` onto the window (or click to choose), check the list of
 articles it found (titles, authors, subheadings), fill in the book title /
 author / language, and click **Create EPUB…** to save the file.
 
+### Publishing a monthly issue to the books website
+
+After you create an EPUB, the **Publish to GitHub…** button uploads it to the
+[MarxistTamilEbooks](https://github.com/tamilmarxist/MarxistTamilEbooks) repo so
+it appears in the mobile app. One click does three things:
+
+1. uploads the EPUB to `books/<month>_<year>.epub`;
+2. **generates a cover** (a simple bordered design with the Tamil month + year)
+   and uploads it to `images/<month>_<year>.webp` — WebP keeps it small for
+   mobile;
+3. adds (or updates) the book's entry in `booksdb.json`, newest first.
+
+In the dialog, paste a **GitHub token**, pick the **month** and **year** (these
+are pre-filled from the file name), and click **Publish**. Re-publishing the same
+month overwrites its files and updates the existing entry instead of creating a
+duplicate.
+
+**Getting a token:** on GitHub go to *Settings → Developer settings →
+Fine-grained personal access tokens → Generate new token*. Limit it to the
+**MarxistTamilEbooks** repository and give it **Repository permissions →
+Contents: Read and write**. Paste the generated token into the dialog; tick
+*Remember token on this computer* to save it for next time (stored locally in
+your OS settings — treat it like a password and don't share the build with the
+token baked in).
+
+You can also publish from the command line without the GUI:
+
+```bash
+GITHUB_TOKEN=your_token python publisher.py path/to/book.epub 7 2026
+```
+
 ### Handing it to someone with no Python (standalone build)
 
 ```bash

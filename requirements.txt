@@ -3,6 +3,7 @@ EbookLib
 lxml
 PySide6-Essentials
 Flask
+Pillow
 
 # Build-only (for making the standalone desktop executable):
 #   pip install pyinstaller

@@ -19,10 +19,19 @@ Notes
   dependency folder that could be moved or deleted. Trade-off: a onefile app
   unpacks to a temp folder on launch, so it starts a few seconds slower.
 * ebooklib ships data files that must be bundled explicitly (--collect-data).
+* The cover generator (cover.py) reads bundled Tamil fonts from assets/fonts/,
+  so those must be shipped inside the executable too (--add-data). cover.py
+  finds them via sys._MEIPASS at runtime.
 """
 from __future__ import annotations
 
+import os
+
 import PyInstaller.__main__
+
+# --add-data uses os.pathsep between source and destination (':' on Linux/macOS,
+# ';' on Windows). Destination "assets/fonts" matches cover._assets_dir().
+FONTS_DATA = f"assets/fonts{os.pathsep}assets/fonts"
 
 PyInstaller.__main__.run([
     "desktop_app.py",
@@ -33,4 +42,5 @@ PyInstaller.__main__.run([
     "--clean",
     "--collect-data", "ebooklib",   # bundle ebooklib's template/data files
     "--collect-submodules", "docx",
+    "--add-data", FONTS_DATA,       # bundle Tamil fonts for cover generation
 ])
