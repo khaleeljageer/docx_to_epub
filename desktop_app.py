@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal, QObject
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPalette
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QLineEdit, QVBoxLayout,
     QHBoxLayout, QFormLayout, QListWidget, QListWidgetItem, QFileDialog,
@@ -171,8 +171,6 @@ class MainWindow(QWidget):
         btn_row.addWidget(self.make_btn)
         root.addLayout(btn_row)
 
-        self.setStyleSheet(STYLE)
-
     # --- Loading / parsing --------------------------------------------------
     def load_docx(self, path: str):
         p = Path(path)
@@ -268,31 +266,64 @@ class MainWindow(QWidget):
         QMessageBox.critical(self, title, msg)
 
 
-STYLE = """
-QWidget { font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; color: #1a202c; }
-QLabel#muted { color: #6b7280; font-size: 12px; }
-QLabel#found { font-weight: 600; margin-top: 4px; }
-QLabel#drop {
-    border: 2px dashed #cbd5e0; border-radius: 12px; background: #fbfcfe;
-    color: #2b6cb0; font-size: 15px;
+# Two self-consistent palettes so the app reads cleanly on either OS theme
+# instead of inheriting a dark window background under dark text.
+LIGHT = {
+    "bg": "#f7f8fa", "text": "#1a202c", "muted": "#6b7280",
+    "panel": "#ffffff", "border": "#cbd5e0", "border_soft": "#e2e8f0",
+    "item_line": "#f0f2f5", "drop_bg": "#fbfcfe", "drop_hover": "#eef4fb",
+    "accent": "#2b6cb0", "accent_hover": "#255992", "accent_off": "#9db8d6",
+    "on_accent": "#ffffff",
 }
-QLabel#drop[hover="true"] { border-color: #2b6cb0; background: #eef4fb; }
-QListWidget { border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; padding: 4px; }
-QListWidget::item { padding: 8px 6px; border-bottom: 1px solid #f0f2f5; }
-QLineEdit { padding: 6px 8px; border: 1px solid #cbd5e0; border-radius: 6px; background: #fff; }
-QFrame#rule { color: #e2e8f0; }
-QPushButton#primary {
-    background: #2b6cb0; color: #fff; font-weight: 600;
+DARK = {
+    "bg": "#22262c", "text": "#e6e8eb", "muted": "#9aa4b2",
+    "panel": "#2a2f36", "border": "#3a4149", "border_soft": "#343a42",
+    "item_line": "#343a42", "drop_bg": "#262b31", "drop_hover": "#2f3742",
+    "accent": "#3b82c4", "accent_hover": "#4a90d0", "accent_off": "#3a4149",
+    "on_accent": "#ffffff",
+}
+
+
+def build_style(c: dict) -> str:
+    return f"""
+QWidget {{ font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px;
+          color: {c['text']}; background: {c['bg']}; }}
+QLabel#muted {{ color: {c['muted']}; font-size: 12px; background: transparent; }}
+QLabel#found {{ font-weight: 600; margin-top: 4px; background: transparent; }}
+QLabel#drop {{
+    border: 2px dashed {c['border']}; border-radius: 12px; background: {c['drop_bg']};
+    color: {c['accent']}; font-size: 15px;
+}}
+QLabel#drop[hover="true"] {{ border-color: {c['accent']}; background: {c['drop_hover']}; }}
+QListWidget {{ border: 1px solid {c['border_soft']}; border-radius: 8px;
+              background: {c['panel']}; padding: 4px; }}
+QListWidget::item {{ padding: 8px 6px; border-bottom: 1px solid {c['item_line']};
+                    color: {c['text']}; }}
+QLineEdit {{ padding: 6px 8px; border: 1px solid {c['border']}; border-radius: 6px;
+            background: {c['panel']}; color: {c['text']}; }}
+QLineEdit::placeholder {{ color: {c['muted']}; }}
+QFrame#rule {{ color: {c['border_soft']}; background: {c['border_soft']}; }}
+QPushButton#primary {{
+    background: {c['accent']}; color: {c['on_accent']}; font-weight: 600;
     padding: 9px 18px; border: 0; border-radius: 8px;
-}
-QPushButton#primary:disabled { background: #9db8d6; }
-QPushButton#primary:hover:enabled { background: #255992; }
+}}
+QPushButton#primary:disabled {{ background: {c['accent_off']}; }}
+QPushButton#primary:hover:enabled {{ background: {c['accent_hover']}; }}
+QMessageBox, QMessageBox QLabel {{ background: {c['bg']}; color: {c['text']}; }}
 """
+
+
+def _is_dark(app: QApplication) -> bool:
+    """Decide light vs dark from the OS window colour's brightness."""
+    col = app.palette().color(QPalette.Window)
+    luminance = 0.299 * col.red() + 0.587 * col.green() + 0.114 * col.blue()
+    return luminance < 128
 
 
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setStyleSheet(build_style(DARK if _is_dark(app) else LIGHT))
     win = MainWindow()
     win.show()
     return app.exec()

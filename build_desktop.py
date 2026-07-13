@@ -5,14 +5,19 @@ build_desktop.py — Produce a standalone build of the desktop app with PyInstal
     source .venv/bin/activate
     python build_desktop.py
 
-The finished program lands in  dist/EpubMaker/  (a folder you can zip and hand
-to anyone on the SAME operating system — build on Windows for a Windows build,
-on macOS for a macOS build, on Linux for a Linux build).
+The finished program is a SINGLE file:
+    Windows -> dist/EpubMaker.exe
+    Linux   -> dist/EpubMaker
+    macOS   -> dist/EpubMaker
+
+Hand that one file to anyone on the SAME operating system (build on Windows for a
+Windows build, macOS for macOS, Linux for Linux) — nothing else to install.
 
 Notes
 -----
-* We use --onedir (a folder) rather than --onefile: it starts faster and is
-  more reliable with Qt. Zip the whole dist/EpubMaker folder to distribute.
+* --onefile bundles everything into one executable, so there is no separate
+  dependency folder that could be moved or deleted. Trade-off: a onefile app
+  unpacks to a temp folder on launch, so it starts a few seconds slower.
 * ebooklib ships data files that must be bundled explicitly (--collect-data).
 """
 from __future__ import annotations
@@ -22,8 +27,9 @@ import PyInstaller.__main__
 PyInstaller.__main__.run([
     "desktop_app.py",
     "--name", "EpubMaker",
-    "--windowed",              # no console window (GUI app)
-    "--noconfirm",             # overwrite a previous build without prompting
+    "--onefile",              # one self-contained executable, no side folder
+    "--windowed",             # no console window (GUI app)
+    "--noconfirm",            # overwrite a previous build without prompting
     "--clean",
     "--collect-data", "ebooklib",   # bundle ebooklib's template/data files
     "--collect-submodules", "docx",

@@ -47,7 +47,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: EpubMaker-${{ matrix.label }}
-          path: dist/EpubMaker
+          # --onefile output: dist/EpubMaker.exe (Windows) or dist/EpubMaker (Linux)
+          path: dist/EpubMaker*
           if-no-files-found: error
 
   release:

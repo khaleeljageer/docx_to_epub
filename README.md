@@ -49,10 +49,17 @@ pip install pyinstaller
 python build_desktop.py
 ```
 
-This produces a self-contained folder at **`dist/EpubMaker/`**. Zip that folder
-and send it to anyone on the **same operating system** — they run the
-`EpubMaker` program inside; nothing else to install. (PyInstaller builds per
-platform: build on Windows for a Windows build, macOS for macOS, Linux for Linux.)
+This produces a **single self-contained executable**:
+
+- Windows → `dist\EpubMaker.exe`
+- Linux → `dist/EpubMaker`
+- macOS → `dist/EpubMaker`
+
+Send that **one file** to anyone on the **same operating system** — they just run
+it; nothing else to install, and there's no separate dependency folder that could
+be moved or deleted. (PyInstaller builds per platform: build on Windows for a
+Windows build, macOS for macOS, Linux for Linux.) A onefile app unpacks itself on
+launch, so the **first start takes a few seconds** — that's normal.
 
 ### Building both Windows and Linux automatically (GitHub Actions)
 
