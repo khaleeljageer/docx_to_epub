@@ -1,0 +1,79 @@
+name: Build desktop apps
+
+# Builds the standalone EpubMaker desktop app for BOTH Windows and Linux using
+# PyInstaller. Each OS is built on its own matching runner (PyInstaller cannot
+# cross-compile). Downloadable builds appear as "artifacts" on every run; when
+# you push a version tag like v1.0, they are also attached to a GitHub Release.
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]          # e.g. v1.0, v1.2.3  -> publishes a Release
+  pull_request:
+  workflow_dispatch:       # lets you run it by hand from the Actions tab
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+          - os: ubuntu-latest
+            label: Linux
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build the desktop app
+        run: python build_desktop.py
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EpubMaker-${{ matrix.label }}
+          path: dist/EpubMaker
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # required to create the Release
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip each platform build
+        run: |
+          cd artifacts
+          for dir in */; do
+            name="${dir%/}"
+            (cd "$dir" && zip -r "../${name}.zip" .)
+          done
+          ls -la
+
+      - name: Create GitHub Release with the zips
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true

@@ -1,0 +1,8 @@
+python-docx
+EbookLib
+lxml
+PySide6-Essentials
+Flask
+
+# Build-only (for making the standalone desktop executable):
+#   pip install pyinstaller

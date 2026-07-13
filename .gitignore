@@ -1,0 +1,31 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+
+# --- Virtual environment ---
+.venv/
+venv/
+env/
+
+# --- PyInstaller build output ---
+build/
+dist/
+*.spec
+
+# --- App runtime / generated files ---
+*.epub
+epub_maker_uploads/
+
+# --- Source documents (don't commit article docx into the repo) ---
+*.docx
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
